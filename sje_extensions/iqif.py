@@ -25,8 +25,38 @@ class IQIFNode(neuron.BaseNode):
         return super().extra_repr() + f', a={self.a}, b={self.b}, v_unstable={self.v_unstable}, f_min={self.f_min}, ss={self.ss}'
 
     def neuronal_charge(self, x: torch.Tensor):
-        self.v += torch.where(torch.tensor(self.v < self.f_min, device=x.device),
+        #self.v += torch.where(torch.tensor(self.v < self.f_min, device=x.device),
+        self.v += torch.where(self.v < self.f_min,
                              (self.a * (self.v_reset - self.v)) * self.ss + x,
                              (self.b * (self.v - self.v_unstable)) * self.ss + x)
         self.v *= self.v >= 0.
+
+class AdaptiveLIFNode(neuron.LIFNode):
+    def __init__(self, n_exc=400, tau=100.0, **kwargs):
+        super().__init__(tau=tau, **kwargs)
+
+        # Adaptive threshold parameters
+        self.theta_plus = 0.0038
+        self.tau_theta = 1e7
+
+        # Adaptive Threshold Buffer
+        initial_theta = torch.full((1, n_exc), 1.0)
+        self.register_buffer('theta', initial_theta)
+
+    def neuronal_fire(self):
+        # Fire by comparing membrane potential `v` to the adaptive threshold `theta`
+        return self.surrogate_function(self.v - self.theta)
+
+    def neuronal_reset(self, spike):
+        # First, perform the standard LIF reset
+        super().neuronal_reset(spike)
+        
+        # Then, apply the homeostatic updates to theta
+        self.theta -= self.theta / self.tau_theta
+        self.theta += self.theta_plus * spike
+
+    def reset(self):
+        # Also reset theta when the neuron is reset
+        super().reset()
+        self.theta.fill_(1.0)
 
